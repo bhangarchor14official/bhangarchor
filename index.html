@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BhangarChor</title>
+    <style>
+        /* CSS: RESET EVERYTHING TO FULL SCREEN */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000; /* Fallback color */
+            overflow: hidden; /* Prevent scrolling */
+            touch-action: none; /* Disables double-tap zoom */
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #70c5ce;
+        }
+
+        #instructions {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            color: white;
+            bottom: 10%; /* Responsive bottom position */
+            font-size: 20px;
+            pointer-events: none;
+            text-shadow: 2px 2px 0 #000;
+            font-weight: bold;
+            z-index: 10;
+        }
+        
+        #instructions span {
+            background-color: rgba(0,0,0,0.6);
+            padding: 10px 20px;
+            border-radius: 30px;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="birdCanvas"></canvas>
+    <div id="instructions"><span>धाराशिवचा कमिशन एजन्ट</span></div>
+
+    <script>
+        const canvas = document.getElementById("birdCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // --- DYNAMIC FULL SCREEN SETUP ---
+        let GAME_W, GAME_H;
+
+        function resizeCanvas() {
+            // Get the browser window dimensions
+            GAME_W = window.innerWidth;
+            GAME_H = window.innerHeight;
+
+            // Handle High DPI screens (Retina) for sharpness
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = GAME_W * dpr;
+            canvas.height = GAME_H * dpr;
+            
+            // Normalize scale so code uses CSS pixels
+            ctx.scale(dpr, dpr);
+        }
+
+        // Initialize size immediately
+        resizeCanvas();
+
+        // If user rotates phone, resize again
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- 1. LOAD ASSETS ---
+        const birdImg = new Image(); birdImg.src = "bird.png";
+        const coinImg = new Image(); coinImg.src = "coin.png";
+
+        const bombImages = [];
+        for(let i = 1; i <= 4; i++) {
+            let img = new Image();
+            img.src = `bomb${i}.png`; 
+            bombImages.push(img);
+        }
+
+        const jumpSound = new Audio(); jumpSound.src = "jump.mp3";
+        const crashSound = new Audio(); crashSound.src = "crash.mp3";
+
+        // --- 2. GAME VARIABLES ---
+        let frames = 0;
+        const DEGREE = Math.PI / 180;
+
+        const state = {
+            current: 0,
+            getReady: 0,
+            game: 1,
+            over: 2
+        };
+
+        function triggerGameOver() {
+            if(state.current !== state.over) {
+                state.current = state.over;
+                crashSound.play();
+            }
+        }
+
+        const score = {
+            value: 0,
+            draw: function() {
+                ctx.save();
+                ctx.fillStyle = "#FFF";
+                ctx.strokeStyle = "#000";
+                ctx.lineWidth = 2;
+                
+                if (state.current == state.game) {
+                    // Top Center Score
+                    ctx.font = "bold 40px Arial";
+                    let text = "₹ " + this.value.toLocaleString('en-IN');
+                    let textWidth = ctx.measureText(text).width;
+                    ctx.fillText(text, (GAME_W / 2) - (textWidth / 2), 60);
+                    ctx.strokeText(text, (GAME_W / 2) - (textWidth / 2), 60);
+                } 
+                ctx.restore();
+            },
+            reset: function() {
+                this.value = 0;
+            }
+        };
+
+        function controls(evt) {
+            // Prevent default touch behavior (scrolling/zooming)
+            if(evt.type === 'touchstart') evt.preventDefault();
+
+            switch (state.current) {
+                case state.getReady:
+                    state.current = state.game;
+                    jumpSound.currentTime = 0;
+                    jumpSound.play();
+                    bird.flap(); 
+                    break;
+                case state.game:
+                    bird.flap();
+                    jumpSound.currentTime = 0;
+                    jumpSound.play();
+                    break;
+                case state.over:
+                    coinSystem.reset();
+                    bird.speedReset();
+                    score.reset();
+                    frames = 0;
+                    state.current = state.getReady;
+                    break;
+            }
+        }
+        
+        // Add listeners for both Touch (Mobile) and Click (PC)
+        window.addEventListener("touchstart", controls, {passive: false});
+        window.addEventListener("mousedown", controls);
+        window.addEventListener("keydown", (e) => {
+            if(e.code === "Space") controls(e);
+        });
+
+        // --- GAME OBJECTS ---
+
+        const bg = {
+            draw: function() {
+                ctx.fillStyle = "#70c5ce";
+                ctx.fillRect(0, 0, GAME_W, GAME_H); 
+                
+                // Responsive clouds
+                ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                ctx.beginPath(); ctx.arc(GAME_W * 0.2, 200, 20, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(GAME_W * 0.5, 100, 30, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(GAME_W * 0.8, 150, 40, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+
+        const fg = {
+            h: 112,
+            x: 0,
+            dx: 2, 
+            draw: function() {
+                ctx.fillStyle = "#ded895";
+                ctx.fillRect(0, GAME_H - this.h, GAME_W, this.h);
+                ctx.fillStyle = "#73bf2e";
+                ctx.fillRect(0, GAME_H - this.h, GAME_W, 12);
+            },
+            update: function() {
+                if (state.current == state.game) {
+                    this.x = (this.x - this.dx) % (GAME_W / 2);
+                }
+            }
+        }
+
+        const bird = {
+            x: 60, 
+            y: 150,
+            speed: 0,
+            gravity: 0.15, 
+            jump: 3.5,     
+            radius: 36,    
+            
+            draw: function() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                let rotation = this.speed * 3 * DEGREE; 
+                ctx.rotate(rotation);
+                
+                let w = 102; 
+                let h = 72;
+                
+                ctx.imageSmoothingEnabled = true; 
+                ctx.imageSmoothingQuality = 'high';
+
+                ctx.drawImage(birdImg, -w/2, -h/2, w, h);
+                ctx.restore();
+            },
+            flap: function() {
+                this.speed = -this.jump;
+            },
+            update: function() {
+                if (state.current == state.getReady) {
+                    // Center vertically based on screen height
+                    this.y = GAME_H / 2 - 50; 
+                    this.y += Math.cos(frames/10); 
+                } else {
+                    this.speed += this.gravity;
+                    this.y += this.speed;
+                }
+
+                if (this.y + this.radius >= GAME_H - fg.h) {
+                    this.y = GAME_H - fg.h - this.radius;
+                    triggerGameOver();
+                }
+                
+                if(this.y - this.radius <= 0) {
+                    this.y = this.radius;
+                    this.speed = 0;
+                }
+            },
+            speedReset: function() {
+                this.speed = 0;
+            }
+        }
+
+        const coinSystem = {
+            items: [],
+            r: 40, 
+            dx: 2, 
+            
+            draw: function() {
+                for(let i=0; i<this.items.length; i++){
+                    let c = this.items[i];
+                    let s = 100; // Big Size
+
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+
+                    if(c.type === 'gold') {
+                        ctx.drawImage(coinImg, c.x - s/2, c.y - s/2, s, s);
+                    } else {
+                        ctx.drawImage(c.bombImage, c.x - s/2, c.y - s/2, s, s);
+                    }
+                }
+            },
+            
+            update: function() {
+                if(state.current !== state.game) return;
+
+                if(frames % 100 == 0) {
+                    let type = Math.random() < 0.7 ? 'gold' : 'bomb';
+                    let assignedImage = null;
+                    if(type === 'bomb') {
+                        let randomIndex = Math.floor(Math.random() * 4); 
+                        assignedImage = bombImages[randomIndex];
+                    }
+
+                    this.items.push({
+                        x: GAME_W + 50,
+                        // Dynamic Height: random pos between top of screen and floor
+                        y: Math.random() * (GAME_H - fg.h - 150) + 75,
+                        type: type,
+                        bombImage: assignedImage
+                    });
+                }
+
+                for(let i=0; i<this.items.length; i++){
+                    let c = this.items[i];
+                    c.x -= this.dx;
+
+                    let dx = bird.x - c.x;
+                    let dy = bird.y - c.y;
+                    let distance = Math.sqrt(dx*dx + dy*dy);
+
+                    if(distance < bird.radius + this.r) {
+                        if(c.type === 'gold') {
+                            score.value += 10000; 
+                            this.items.splice(i, 1);
+                            i--;
+                            continue;
+                        } else {
+                            triggerGameOver();
+                        }
+                    }
+
+                    if(c.x + 100 < 0) {
+                        this.items.shift();
+                        i--;
+                    }
+                }
+            },
+            reset: function() {
+                this.items = [];
+            }
+        }
+
+        const ui = {
+            draw: function() {
+                if(state.current == state.getReady) {
+                    ctx.fillStyle = "#000";
+                    ctx.lineWidth = 2;
+                    ctx.font = "30px Arial";
+                    let text = "GET READY";
+                    let w = ctx.measureText(text).width;
+                    ctx.fillText(text, (GAME_W/2) - (w/2), GAME_H/2 + 20);
+                } 
+                else if(state.current == state.over) {
+                    // Center the UI Box
+                    let boxW = 300;
+                    let boxH = 200;
+                    let boxX = (GAME_W/2) - (boxW/2);
+                    let boxY = (GAME_H/2) - (boxH/2);
+
+                    ctx.fillStyle = "#FFF";
+                    ctx.strokeStyle = "#000";
+                    ctx.lineWidth = 3;
+                    
+                    // Box
+                    ctx.fillRect(boxX, boxY, boxW, boxH);
+                    ctx.strokeRect(boxX, boxY, boxW, boxH);
+                    
+                    // "GAME OVER"
+                    ctx.fillStyle = "#e74c3c";
+                    ctx.font = "bold 35px Arial";
+                    let goText = "GAME OVER";
+                    let goW = ctx.measureText(goText).width;
+                    ctx.fillText(goText, (GAME_W/2) - (goW/2), boxY + 50);
+                    
+                    // "Total Earnings:"
+                    ctx.fillStyle = "#000";
+                    ctx.font = "18px Arial";
+                    let earnText = "Total Earnings:";
+                    let earnW = ctx.measureText(earnText).width;
+                    ctx.fillText(earnText, (GAME_W/2) - (earnW/2), boxY + 90);
+
+                    // SCORE
+                    ctx.fillStyle = "#2ecc71"; 
+                    ctx.font = "bold 32px Arial";
+                    let valText = "₹ " + score.value.toLocaleString('en-IN');
+                    let valW = ctx.measureText(valText).width;
+                    ctx.fillText(valText, (GAME_W/2) - (valW/2), boxY + 130);
+                    
+                    // "Tap to Restart"
+                    ctx.fillStyle = "#7f8c8d";
+                    ctx.font = "16px Arial";
+                    let playText = "Tap to Restart";
+                    let playW = ctx.measureText(playText).width;
+                    ctx.fillText(playText, (GAME_W/2) - (playW/2), boxY + 170);
+                }
+            }
+        }
+
+        function draw() {
+            bg.draw();
+            fg.draw();
+            coinSystem.draw();
+            bird.draw();
+            score.draw();
+            ui.draw();
+        }
+
+        function update() {
+            bird.update();
+            fg.update();
+            coinSystem.update();
+        }
+
+        function loop() {
+            update();
+            draw();
+            frames++;
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+
+    </script>
+</body>
+</html>
